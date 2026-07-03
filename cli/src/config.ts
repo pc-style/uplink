@@ -14,11 +14,11 @@ export async function loadConfig(): Promise<Config> {
     const file = Bun.file(CONFIG_FILE);
     const data = await file.json();
     return {
-      server: data.server || "",
-      apiKey: data.apiKey || "",
+      server: process.env.UPLINK_SERVER || data.server || "",
+      apiKey: process.env.UPLINK_API_KEY || data.apiKey || "",
     };
   } catch {
-    return { server: "", apiKey: "" };
+    return { server: process.env.UPLINK_SERVER || "", apiKey: process.env.UPLINK_API_KEY || "" };
   }
 }
 

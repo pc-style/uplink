@@ -7,6 +7,7 @@ import { apiRequest, errorExit } from "../http";
 type ManifestFile = {
   path: string;
   key: string;
+  sha256: string;
   size: number;
   contentType: string;
   uploadedAt: string;
@@ -47,6 +48,8 @@ async function pushDirectory(options: Record<string, string | boolean>): Promise
   const manifestPath = String(options.manifest || "uplink-manifest.json");
   const includeAll = options.all === true;
   const files = await collectFiles(dir, includeAll);
+  const previous = await readManifest(manifestPath);
+  const previousByHash = new Map(previous?.files.map((file) => [file.sha256, file]));
 
   const manifest: Manifest = {
     version: 1,
@@ -58,10 +61,19 @@ async function pushDirectory(options: Record<string, string | boolean>): Promise
   for (const path of files) {
     const rel = relative(dir, path).replaceAll("\\", "/");
     const file = Bun.file(path);
+    const sha256 = await fileSha256(file);
+    const reusable = previousByHash.get(sha256);
+    if (reusable) {
+      manifest.files.push({ ...reusable, path: rel });
+      if (options.json !== true) console.log(`reused ${rel} -> ${reusable.key}`);
+      continue;
+    }
+
     const form = new FormData();
     form.append("file", file, rel);
     form.append("filename", rel);
     form.append("permanent", "true");
+    form.append("metadata", JSON.stringify({ sha256, path: rel, source: "uplink-sync" }));
 
     const res = await apiRequest("POST", `${config.server}/api/upload`, config.apiKey, form);
     if (!res.ok) {
@@ -69,7 +81,7 @@ async function pushDirectory(options: Record<string, string | boolean>): Promise
       errorExit(`Upload failed for ${rel} (${res.status}): ${body}`);
     }
     const data = await res.json() as { key: string; size: number; contentType: string; uploadedAt: string };
-    manifest.files.push({ path: rel, key: data.key, size: data.size, contentType: data.contentType, uploadedAt: data.uploadedAt });
+    manifest.files.push({ path: rel, key: data.key, sha256, size: data.size, contentType: data.contentType, uploadedAt: data.uploadedAt });
     if (options.json !== true) console.log(`uploaded ${rel} -> ${data.key}`);
   }
 
@@ -135,4 +147,17 @@ async function collectFiles(dir: string, includeAll: boolean): Promise<string[]>
   await walk(dir);
   found.sort((a, b) => a.localeCompare(b));
   return found;
+}
+
+async function readManifest(path: string): Promise<Manifest | null> {
+  try {
+    return await Bun.file(path).json() as Manifest;
+  } catch {
+    return null;
+  }
+}
+
+async function fileSha256(file: { arrayBuffer(): Promise<ArrayBuffer> }): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

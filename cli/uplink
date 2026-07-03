@@ -196,11 +196,11 @@ async function loadConfig() {
     const file = Bun.file(CONFIG_FILE);
     const data = await file.json();
     return {
-      server: data.server || "",
-      apiKey: data.apiKey || ""
+      server: process.env.UPLINK_SERVER || data.server || "",
+      apiKey: process.env.UPLINK_API_KEY || data.apiKey || ""
     };
   } catch {
-    return { server: "", apiKey: "" };
+    return { server: process.env.UPLINK_SERVER || "", apiKey: process.env.UPLINK_API_KEY || "" };
   }
 }
 async function saveConfig(config) {
@@ -608,6 +608,8 @@ async function pushDirectory(options) {
   const manifestPath = String(options.manifest || "uplink-manifest.json");
   const includeAll = options.all === true;
   const files = await collectFiles(dir, includeAll);
+  const previous = await readManifest(manifestPath);
+  const previousByHash = new Map(previous?.files.map((file) => [file.sha256, file]));
   const manifest = {
     version: 1,
     createdAt: new Date().toISOString(),
@@ -617,17 +619,26 @@ async function pushDirectory(options) {
   for (const path of files) {
     const rel = relative(dir, path).replaceAll("\\", "/");
     const file = Bun.file(path);
+    const sha256 = await fileSha256(file);
+    const reusable = previousByHash.get(sha256);
+    if (reusable) {
+      manifest.files.push({ ...reusable, path: rel });
+      if (options.json !== true)
+        console.log(`reused ${rel} -> ${reusable.key}`);
+      continue;
+    }
     const form = new FormData;
     form.append("file", file, rel);
     form.append("filename", rel);
     form.append("permanent", "true");
+    form.append("metadata", JSON.stringify({ sha256, path: rel, source: "uplink-sync" }));
     const res = await apiRequest("POST", `${config.server}/api/upload`, config.apiKey, form);
     if (!res.ok) {
       const body = await res.text();
       errorExit(`Upload failed for ${rel} (${res.status}): ${body}`);
     }
     const data = await res.json();
-    manifest.files.push({ path: rel, key: data.key, size: data.size, contentType: data.contentType, uploadedAt: data.uploadedAt });
+    manifest.files.push({ path: rel, key: data.key, sha256, size: data.size, contentType: data.contentType, uploadedAt: data.uploadedAt });
     if (options.json !== true)
       console.log(`uploaded ${rel} -> ${data.key}`);
   }
@@ -691,6 +702,17 @@ async function collectFiles(dir, includeAll) {
   await walk(dir);
   found.sort((a, b) => a.localeCompare(b));
   return found;
+}
+async function readManifest(path) {
+  try {
+    return await Bun.file(path).json();
+  } catch {
+    return null;
+  }
+}
+async function fileSha256(file) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 // src/index.ts
