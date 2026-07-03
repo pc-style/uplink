@@ -1,0 +1,698 @@
+#!/usr/bin/env bun
+// @bun
+var __defProp = Object.defineProperty;
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, {
+      get: all[name],
+      enumerable: true,
+      configurable: true,
+      set: __exportSetter.bind(all, name)
+    });
+};
+
+// src/http.ts
+var exports_http = {};
+__export(exports_http, {
+  errorExit: () => errorExit,
+  apiRequest: () => apiRequest
+});
+async function apiRequest(method, url, apiKey, body) {
+  const headers = new Headers;
+  headers.set("authorization", `Bearer ${apiKey}`);
+  let fetchBody;
+  if (body instanceof FormData) {
+    fetchBody = body;
+  } else if (body !== undefined) {
+    headers.set("content-type", "application/json; charset=utf-8");
+    fetchBody = JSON.stringify(body);
+  }
+  return fetch(url, {
+    method,
+    headers,
+    body: fetchBody
+  });
+}
+function errorExit(message) {
+  console.error(`Error: ${message}`);
+  process.exit(1);
+}
+
+// src/command.ts
+class Command {
+  _name;
+  options = [];
+  commands = [];
+  _action;
+  _description = "";
+  _version = "0.1.0";
+  _usage;
+  constructor(_name) {
+    this._name = _name;
+  }
+  description(desc) {
+    this._description = desc;
+    return this;
+  }
+  version(v) {
+    this._version = v;
+    return this;
+  }
+  usage(u) {
+    this._usage = u;
+    return this;
+  }
+  option(flags, description, defaultValue) {
+    this.options.push({ flags, description, defaultValue });
+    return this;
+  }
+  action(fn) {
+    this._action = fn;
+    return this;
+  }
+  addCommand(cmd) {
+    this.commands.push({ name: cmd._name, cmd });
+    return this;
+  }
+  async parse(argv) {
+    const args = argv.slice(2);
+    if (args.includes("--version") || args.includes("-V")) {
+      console.log(this._version);
+      return;
+    }
+    if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+      this.printHelp();
+      return;
+    }
+    const subName = args[0];
+    const sub = this.commands.find((c) => c.name === subName);
+    if (sub) {
+      await sub.cmd.parse([argv[0], argv[1], ...args.slice(1)]);
+      return;
+    }
+    if (args[0] === "--help" || args[0] === "-h") {
+      this.printHelp();
+      return;
+    }
+    const { positional, options } = this.parseArgs(args);
+    if (this._action) {
+      await this._action(positional, options);
+    } else {
+      this.printHelp();
+    }
+  }
+  parseArgs(args) {
+    const positional = [];
+    const options = {};
+    for (const opt of this.options) {
+      if (opt.defaultValue !== undefined) {
+        options[canonicalOptionKey(opt)] = opt.defaultValue;
+      }
+    }
+    for (let i = 0;i < args.length; i++) {
+      const arg = args[i];
+      if (arg.startsWith("--")) {
+        const eqIdx = arg.indexOf("=");
+        if (eqIdx !== -1) {
+          const key = arg.slice(2, eqIdx);
+          const optDef = findOptionDef(this.options, key);
+          options[optDef ? canonicalOptionKey(optDef) : key] = arg.slice(eqIdx + 1);
+        } else {
+          const key = arg.slice(2);
+          const optDef = findOptionDef(this.options, key);
+          if (optDef && optionTakesValue(optDef) && i + 1 < args.length && !args[i + 1].startsWith("-")) {
+            options[canonicalOptionKey(optDef)] = args[++i];
+          } else {
+            options[optDef ? canonicalOptionKey(optDef) : key] = true;
+          }
+        }
+      } else if (arg.startsWith("-") && arg.length === 2) {
+        const key = arg.slice(1);
+        const optDef = this.options.find((o) => o.flags.split(",").some((part) => optionFlagName(part) === key));
+        if (optDef && optionTakesValue(optDef) && i + 1 < args.length && !args[i + 1].startsWith("-")) {
+          options[canonicalOptionKey(optDef)] = args[++i];
+        } else {
+          options[optDef ? canonicalOptionKey(optDef) : key] = true;
+        }
+      } else {
+        positional.push(arg);
+      }
+    }
+    return { positional, options };
+  }
+  printHelp() {
+    const usage = this._usage || [this._name, ...this.commands.map((c) => c.name)].join(" ");
+    console.log(`
+  ${this._description}
+`);
+    console.log(`  Usage: ${usage}`);
+    if (this.commands.length > 0) {
+      console.log(`
+  Commands:`);
+      for (const c of this.commands) {
+        console.log(`    ${c.name.padEnd(16)} ${c.cmd._description}`);
+      }
+    }
+    if (this.options.length > 0) {
+      console.log(`
+  Options:`);
+      for (const opt of this.options) {
+        const def = opt.defaultValue !== undefined ? ` (default: ${opt.defaultValue})` : "";
+        console.log(`    ${opt.flags.padEnd(22)} ${opt.description}${def}`);
+      }
+    }
+    console.log(`
+  --help, -h            Show help`);
+    console.log(`  --version, -V         Show version
+`);
+  }
+}
+function canonicalOptionKey(opt) {
+  const long = opt.flags.split(",").map((s) => s.trim()).find((part) => part.startsWith("--"));
+  const raw = (long ?? opt.flags.split(",")[0].trim()).split(/\s+/)[0].replace(/^-+/, "");
+  return raw.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+}
+function optionTakesValue(opt) {
+  return /<[^>]+>/.test(opt.flags);
+}
+function optionFlagName(flagPart) {
+  return flagPart.trim().split(/\s+/)[0].replace(/^-+/, "");
+}
+function findOptionDef(options, key) {
+  return options.find((o) => o.flags.split(",").some((part) => optionFlagName(part) === key));
+}
+
+// src/config.ts
+import { homedir } from "os";
+import { join } from "path";
+var CONFIG_DIR = join(homedir(), ".config", "uplink");
+var CONFIG_FILE = join(CONFIG_DIR, "config.json");
+async function loadConfig() {
+  try {
+    const file = Bun.file(CONFIG_FILE);
+    const data = await file.json();
+    return {
+      server: data.server || "",
+      apiKey: data.apiKey || ""
+    };
+  } catch {
+    return { server: "", apiKey: "" };
+  }
+}
+async function saveConfig(config) {
+  await Bun.write(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+async function clearConfig() {
+  try {
+    await Bun.$`rm -f ${CONFIG_FILE}`;
+  } catch {}
+}
+
+// src/commands/auth.ts
+var authCommand = new Command("auth").description("Manage authentication (server URL and API key)").action(async (args, options) => {
+  const sub = args[0];
+  if (sub === "set") {
+    const server = String(options.server || "");
+    const apiKey = String(options.key || "");
+    if (!server || !apiKey) {
+      console.error("Error: --server and --key are required");
+      process.exit(1);
+    }
+    await saveConfig({ server: server.replace(/\/+$/, ""), apiKey });
+    console.log("Credentials saved.");
+  } else if (sub === "show") {
+    const config = await loadConfig();
+    if (!config.server && !config.apiKey) {
+      console.log("No credentials configured. Run: uplink auth set --server <url> --key <api-key>");
+      return;
+    }
+    console.log(`Server:  ${config.server || "(not set)"}`);
+    console.log(`API Key: ${config.apiKey ? "********" + config.apiKey.slice(-4) : "(not set)"}`);
+  } else if (sub === "clear") {
+    await clearConfig();
+    console.log("Credentials cleared.");
+  } else {
+    console.log("Usage: uplink auth <set|show|clear>");
+    console.log("  set   --server <url> --key <api-key>   Save credentials");
+    console.log("  show                                   Show current credentials");
+    console.log("  clear                                  Remove saved credentials");
+    process.exit(1);
+  }
+});
+
+// src/commands/upload.ts
+var uploadCommand = new Command("upload").description("Upload a file to up!link").usage("uplink upload <file> [-s] [-p] [--custom-url <name>] [-c] [--json]").option("--file, -f <path>", "Path to the file to upload").option("--filename, -n <name>", "Override the filename stored on the server").option("--content-type, -t <type>", "Content type (auto-detected if not set)").option("--ttl <seconds>", "Time-to-live for the temporary download URL", "3600").option("--permanent, -p", "Also generate a permanent download URL").option("--short, -s", "Create a really short share URL (auto-expires in 7 days)").option("--custom-url <name>", "Use a custom short URL name instead of a random one (e.g. --custom-url myreport)").option("--copy, -c", "Copy the resulting URL to the clipboard (short URL if -s/--custom-url, permanent if -p, else temporary)").option("--json, -j", "Output result as JSON").action(async (args, options) => {
+  const config = await loadConfig();
+  if (!config.server || !config.apiKey) {
+    errorExit("Not configured. Run: uplink auth set --server <url> --key <api-key>");
+  }
+  const filePath = String(options.file || args[0] || "");
+  if (!filePath) {
+    errorExit(`Usage: uplink upload <file> [--short]
+       uplink upload --file <path> [options]`);
+  }
+  const file = Bun.file(filePath);
+  const exists = await file.exists();
+  if (!exists) {
+    errorExit(`File not found: ${filePath}`);
+  }
+  const filename = String(options.filename || args[1] || filePath.split(/[\\/]/).pop() || "upload.bin");
+  const contentType = String(options.contentType || file.type || "application/octet-stream");
+  const ttl = String(options.ttl || "3600");
+  const permanent = options.permanent === true;
+  const short = options.short === true;
+  const customUrl = options.customUrl ? String(options.customUrl) : undefined;
+  const copy = options.copy === true;
+  const form = new FormData;
+  form.append("file", file, filename);
+  form.append("filename", filename);
+  form.append("ttlSeconds", ttl);
+  if (permanent)
+    form.append("permanent", "true");
+  if (short || customUrl)
+    form.append("short", "true");
+  if (customUrl)
+    form.append("shortName", customUrl);
+  const url = `${config.server}/api/upload`;
+  const res = await apiRequest("POST", url, config.apiKey, form);
+  if (!res.ok) {
+    const body = await res.text();
+    errorExit(`Upload failed (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  const linkToCopy = (customUrl || short) && data.shortUrl ? data.shortUrl : permanent && data.permanentUrl ? data.permanentUrl : data.temporaryUrl;
+  if (copy && linkToCopy) {
+    try {
+      await Bun.$`echo -n ${linkToCopy} | pbcopy`.quiet();
+    } catch {}
+  }
+  if (options.json === true) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if ((short || customUrl) && data.shortUrl) {
+    console.log(data.shortUrl);
+    if (copy) {
+      console.error(`Copied to clipboard.`);
+    }
+    return;
+  }
+  console.log(`
+  Uploaded: ${data.filename}`);
+  console.log(`  Key:      ${data.key}`);
+  console.log(`  Size:     ${formatBytes(data.size)}`);
+  console.log(`  Type:     ${data.contentType}`);
+  console.log(`  URL:      ${data.temporaryUrl}`);
+  if (data.shortUrl) {
+    console.log(`  Short:    ${data.shortUrl}`);
+  }
+  if (data.permanentUrl) {
+    console.log(`  Permanent: ${data.permanentUrl}`);
+  }
+  console.log(`  Expires:  ${data.expiresAt}
+`);
+  if (copy && linkToCopy) {
+    console.log(`Copied to clipboard: ${linkToCopy}`);
+  }
+});
+function formatBytes(bytes) {
+  if (bytes === 0)
+    return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 2 : 0)} ${units[i]}`;
+}
+
+// src/commands/upload-url.ts
+var uploadUrlCommand = new Command("upload-url").description("Create a signed URL for a client to upload directly").option("--filename, -n <name>", "Expected filename", "upload.bin").option("--content-type, -t <type>", "Expected content type").option("--ttl <seconds>", "Time-to-live for the upload URL", "900").option("--json, -j", "Output result as JSON").action(async (args, options) => {
+  const config = await loadConfig();
+  if (!config.server || !config.apiKey) {
+    errorExit("Not configured. Run: uplink auth set --server <url> --key <api-key>");
+  }
+  const filename = String(options.filename || args[0] || "upload.bin");
+  const ttl = String(options.ttl || "900");
+  const contentType = String(options.contentType || "");
+  const body = { filename, ttlSeconds: parseInt(ttl, 10) };
+  if (contentType)
+    body.contentType = contentType;
+  const res = await apiRequest("POST", `${config.server}/api/upload-url`, config.apiKey, body);
+  if (!res.ok) {
+    const err = await res.text();
+    errorExit(`Failed (${res.status}): ${err}`);
+  }
+  const data = await res.json();
+  if (options.json === true) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(`
+  Upload URL: ${data.uploadUrl}`);
+  console.log(`  Method:     ${data.method}`);
+  console.log(`  Key:        ${data.key}`);
+  console.log(`  Expires:    ${data.expiresAt}
+`);
+});
+
+// src/commands/ingest.ts
+var ingestCommand = new Command("ingest").description("Download a file from a remote URL and store it in up!link").option("--url, -u <url>", "Source URL to fetch").option("--filename, -n <name>", "Override the stored filename").option("--content-type, -t <type>", "Override content type").option("--ttl <seconds>", "Time-to-live for the temporary download URL", "3600").option("--permanent, -p", "Also generate a permanent download URL").option("--short, -s", "Create a really short share URL (auto-expires in 7 days)").option("--custom-url <name>", "Use a custom short URL name (implies --short)").option("--copy, -c", "Copy the resulting URL to the clipboard").option("--json, -j", "Output result as JSON").action(async (args, options) => {
+  const config = await loadConfig();
+  if (!config.server || !config.apiKey) {
+    errorExit("Not configured. Run: uplink auth set --server <url> --key <api-key>");
+  }
+  const sourceUrl = String(options.url || args[0] || "");
+  if (!sourceUrl) {
+    errorExit("Usage: uplink ingest --url <source-url> [options]");
+  }
+  const ttl = String(options.ttl || "3600");
+  const permanent = options.permanent === true;
+  const short = options.short === true;
+  const customUrl = options.customUrl ? String(options.customUrl) : undefined;
+  const copy = options.copy === true;
+  const body = { url: sourceUrl, ttlSeconds: parseInt(ttl, 10) };
+  if (options.filename)
+    body.filename = String(options.filename);
+  if (options.contentType)
+    body.contentType = String(options.contentType);
+  if (permanent)
+    body.permanent = true;
+  if (short)
+    body.short = true;
+  if (customUrl)
+    body.shortName = customUrl;
+  const res = await apiRequest("POST", `${config.server}/api/ingest-url`, config.apiKey, body);
+  if (!res.ok) {
+    const err = await res.text();
+    errorExit(`Ingest failed (${res.status}): ${err}`);
+  }
+  const data = await res.json();
+  const linkToCopy = (customUrl || short) && data.shortUrl ? data.shortUrl : permanent && data.permanentUrl ? data.permanentUrl : data.temporaryUrl;
+  if (copy && linkToCopy) {
+    try {
+      await Bun.$`echo -n ${linkToCopy} | pbcopy`.quiet();
+    } catch {}
+  }
+  if (options.json === true) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if ((short || customUrl) && data.shortUrl) {
+    console.log(data.shortUrl);
+    if (copy)
+      console.error("Copied to clipboard.");
+    return;
+  }
+  console.log(`
+  Ingested:  ${data.filename}`);
+  console.log(`  Key:       ${data.key}`);
+  console.log(`  Size:      ${formatBytes2(data.size)}`);
+  console.log(`  Type:      ${data.contentType}`);
+  console.log(`  URL:       ${data.temporaryUrl}`);
+  if (data.shortUrl) {
+    console.log(`  Short:     ${data.shortUrl}`);
+  }
+  if (data.permanentUrl) {
+    console.log(`  Permanent: ${data.permanentUrl}`);
+  }
+  console.log(`  Expires:   ${data.expiresAt}
+`);
+  if (copy && linkToCopy) {
+    console.log(`Copied to clipboard: ${linkToCopy}`);
+  }
+});
+function formatBytes2(bytes) {
+  if (bytes === 0)
+    return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 2 : 0)} ${units[i]}`;
+}
+
+// src/commands/sign.ts
+var signCommand = new Command("sign").description("Create a signed download URL for an existing file").option("--key, -k <key>", "Object key (path) in storage").option("--ttl <seconds>", "Time-to-live for the signed URL", "3600").option("--permanent, -p", "Create a permanent (non-expiring) URL").option("--short, -s", "Also create a short share URL (7 days by default, permanent if -p)").option("--custom-url <name>", "Use a custom short URL name (implies --short)").option("--copy, -c", "Copy the resulting URL (or short URL) to the clipboard").option("--json, -j", "Output result as JSON").action(async (args, options) => {
+  const config = await loadConfig();
+  if (!config.server || !config.apiKey) {
+    errorExit("Not configured. Run: uplink auth set --server <url> --key <api-key>");
+  }
+  const key = String(options.key || args[0] || "");
+  if (!key) {
+    errorExit("Usage: uplink sign --key <object-key> [options]");
+  }
+  const ttl = String(options.ttl || "3600");
+  const permanent = options.permanent === true;
+  const short = options.short === true;
+  const customUrl = options.customUrl ? String(options.customUrl) : undefined;
+  const copy = options.copy === true;
+  const body = { key };
+  if (permanent) {
+    body.permanent = true;
+  } else {
+    body.ttlSeconds = parseInt(ttl, 10);
+  }
+  if (short || customUrl) {
+    body.short = true;
+    if (customUrl)
+      body.shortName = customUrl;
+  }
+  const res = await apiRequest("POST", `${config.server}/api/sign`, config.apiKey, body);
+  if (!res.ok) {
+    const err = await res.text();
+    errorExit(`Sign failed (${res.status}): ${err}`);
+  }
+  const data = await res.json();
+  const linkToCopy = (customUrl || short) && data.shortUrl ? data.shortUrl : data.url;
+  if (copy && linkToCopy) {
+    try {
+      await Bun.$`echo -n ${linkToCopy} | pbcopy`.quiet();
+    } catch {}
+  }
+  if (options.json === true) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(`
+  Key:       ${data.key}`);
+  console.log(`  URL:       ${data.url}`);
+  if (data.shortUrl) {
+    console.log(`  Short:     ${data.shortUrl}`);
+  }
+  console.log(`  Permanent: ${data.permanent}`);
+  if (data.expiresAt) {
+    console.log(`  Expires:   ${data.expiresAt}`);
+  }
+  if (data.shortExpiresAt) {
+    console.log(`  Short expires: ${data.shortExpiresAt}`);
+  }
+  console.log();
+  if (copy && linkToCopy) {
+    console.log(`Copied to clipboard: ${linkToCopy}`);
+  }
+});
+
+// src/commands/info.ts
+var infoCommand = new Command("info").description("Get metadata for a stored file").option("--key, -k <key>", "Object key (path) in storage").option("--json, -j", "Output result as JSON").action(async (args, options) => {
+  const config = await loadConfig();
+  if (!config.server || !config.apiKey) {
+    errorExit("Not configured. Run: uplink auth set --server <url> --key <api-key>");
+  }
+  const key = String(options.key || args[0] || "");
+  if (!key) {
+    errorExit("Usage: uplink info --key <object-key>");
+  }
+  const res = await apiRequest("GET", `${config.server}/api/files/${encodeURIComponent(key)}`, config.apiKey);
+  if (!res.ok) {
+    const err = await res.text();
+    errorExit(`Info failed (${res.status}): ${err}`);
+  }
+  const data = await res.json();
+  if (options.json === true) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(`
+  Key:     ${data.key}`);
+  console.log(`  Size:    ${formatBytes3(data.size)}`);
+  console.log(`  ETag:    ${data.etag}`);
+  console.log(`  Uploaded: ${data.uploaded}`);
+  if (data.httpMetadata) {
+    console.log(`  Content-Type: ${data.httpMetadata.contentType || "(none)"}`);
+  }
+  if (data.customMetadata && Object.keys(data.customMetadata).length > 0) {
+    console.log(`  Metadata:`);
+    for (const [k, v] of Object.entries(data.customMetadata)) {
+      console.log(`    ${k}: ${v}`);
+    }
+  }
+  console.log();
+});
+function formatBytes3(bytes) {
+  if (bytes === 0)
+    return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 2 : 0)} ${units[i]}`;
+}
+
+// src/commands/download.ts
+var downloadCommand = new Command("download").description("Download a file from a signed URL or by key").option("--url, -u <url>", "Full signed download URL").option("--key, -k <key>", "Object key (will create a signed URL first)").option("--output, -o <path>", "Output file path (defaults to filename or stdout)").action(async (args, options) => {
+  const config = await loadConfig();
+  if (!config.server || !config.apiKey) {
+    errorExit("Not configured. Run: uplink auth set --server <url> --key <api-key>");
+  }
+  let downloadUrl = String(options.url || "");
+  if (!downloadUrl) {
+    const key = String(options.key || args[0] || "");
+    if (!key) {
+      errorExit("Usage: uplink download --url <signed-url> OR uplink download --key <object-key>");
+    }
+    const { apiRequest: apiRequest2 } = await Promise.resolve().then(() => exports_http);
+    const res2 = await apiRequest2("POST", `${config.server}/api/sign`, config.apiKey, { key, permanent: true });
+    if (!res2.ok) {
+      const err = await res2.text();
+      errorExit(`Failed to sign (${res2.status}): ${err}`);
+    }
+    const data = await res2.json();
+    downloadUrl = data.url;
+  }
+  const res = await fetch(downloadUrl);
+  if (!res.ok) {
+    errorExit(`Download failed (${res.status})`);
+  }
+  const outputPath = String(options.output || "");
+  if (outputPath) {
+    const writer = Bun.file(outputPath).writer();
+    const reader = res.body?.getReader();
+    if (!reader) {
+      errorExit("No response body");
+    }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done)
+          break;
+        writer.write(value);
+      }
+    } finally {
+      await writer.end();
+    }
+    console.log(`Downloaded to: ${outputPath}`);
+  } else {
+    const blob = await res.blob();
+    const arrayBuffer = await blob.arrayBuffer();
+    await Bun.write(Bun.stdout, new Uint8Array(arrayBuffer));
+  }
+});
+
+// src/commands/sync.ts
+import { mkdir, readdir } from "fs/promises";
+import { dirname, join as join2, relative } from "path";
+var MEDIA_RE = /\.(jpe?g|png|webp|gif|mp4|mov|wav|mp3|m4a|aac)$/i;
+var syncCommand = new Command("sync").description("Push or pull a directory through up!link using a local manifest").usage("uplink sync <push|pull> [--dir assets] [--manifest uplink-manifest.json] [--json]").option("--dir, -d <path>", "Directory to sync", "assets").option("--manifest, -m <path>", "Manifest file path", "uplink-manifest.json").option("--all", "Include every regular file, not just common media extensions").option("--json, -j", "Output result as JSON").action(async (args, options) => {
+  const sub = args[0];
+  if (sub === "push") {
+    await pushDirectory(options);
+    return;
+  }
+  if (sub === "pull") {
+    await pullDirectory(options);
+    return;
+  }
+  errorExit("Usage: uplink sync <push|pull> [--dir assets] [--manifest uplink-manifest.json]");
+});
+async function pushDirectory(options) {
+  const config = await configured();
+  const dir = String(options.dir || "assets");
+  const manifestPath = String(options.manifest || "uplink-manifest.json");
+  const includeAll = options.all === true;
+  const files = await collectFiles(dir, includeAll);
+  const manifest = {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    sourceDir: dir,
+    files: []
+  };
+  for (const path of files) {
+    const rel = relative(dir, path).replaceAll("\\", "/");
+    const file = Bun.file(path);
+    const form = new FormData;
+    form.append("file", file, rel);
+    form.append("filename", rel);
+    form.append("permanent", "true");
+    const res = await apiRequest("POST", `${config.server}/api/upload`, config.apiKey, form);
+    if (!res.ok) {
+      const body = await res.text();
+      errorExit(`Upload failed for ${rel} (${res.status}): ${body}`);
+    }
+    const data = await res.json();
+    manifest.files.push({ path: rel, key: data.key, size: data.size, contentType: data.contentType, uploadedAt: data.uploadedAt });
+    if (options.json !== true)
+      console.log(`uploaded ${rel} -> ${data.key}`);
+  }
+  await Bun.write(manifestPath, JSON.stringify(manifest, null, 2) + `
+`);
+  if (options.json === true) {
+    console.log(JSON.stringify(manifest, null, 2));
+    return;
+  }
+  console.log(`Wrote manifest: ${manifestPath}`);
+}
+async function pullDirectory(options) {
+  const config = await configured();
+  const dir = String(options.dir || "assets");
+  const manifestPath = String(options.manifest || "uplink-manifest.json");
+  const manifest = await Bun.file(manifestPath).json();
+  for (const file of manifest.files) {
+    const out = join2(dir, file.path);
+    await mkdir(dirname(out), { recursive: true });
+    const sign = await apiRequest("POST", `${config.server}/api/sign`, config.apiKey, { key: file.key, permanent: true });
+    if (!sign.ok) {
+      const body = await sign.text();
+      errorExit(`Sign failed for ${file.path} (${sign.status}): ${body}`);
+    }
+    const signed = await sign.json();
+    const res = await fetch(signed.url);
+    if (!res.ok)
+      errorExit(`Download failed for ${file.path} (${res.status})`);
+    await Bun.write(out, await res.arrayBuffer());
+    if (options.json !== true)
+      console.log(`downloaded ${file.path}`);
+  }
+  if (options.json === true) {
+    console.log(JSON.stringify({ downloaded: manifest.files.length, dir, manifest: manifestPath }, null, 2));
+    return;
+  }
+  console.log(`Downloaded ${manifest.files.length} file(s) to ${dir}`);
+}
+async function configured() {
+  const config = await loadConfig();
+  if (!config.server || !config.apiKey) {
+    errorExit("Not configured. Run: uplink auth set --server <url> --key <api-key>");
+  }
+  return config;
+}
+async function collectFiles(dir, includeAll) {
+  const found = [];
+  async function walk(path) {
+    const entries = await readdir(path, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith("."))
+        continue;
+      const full = join2(path, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+      } else if (entry.isFile() && (includeAll || MEDIA_RE.test(full))) {
+        found.push(full);
+      }
+    }
+  }
+  await walk(dir);
+  found.sort((a, b) => a.localeCompare(b));
+  return found;
+}
+
+// src/index.ts
+var program = new Command("uplink").description("up!link CLI \u2014 upload, manage, and share files via Cloudflare R2").version("0.1.0").addCommand(authCommand).addCommand(uploadCommand).addCommand(uploadUrlCommand).addCommand(ingestCommand).addCommand(signCommand).addCommand(infoCommand).addCommand(downloadCommand).addCommand(syncCommand);
+await program.parse(process.argv);

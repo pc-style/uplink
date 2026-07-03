@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "uplink",
+  "account_id": "aa42f3106c86a8ecf22ce639f61343c7",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "alias": {
+    "fast-deep-equal": "./node_modules/fast-deep-equal",
+    "json-schema-traverse": "./node_modules/json-schema-traverse",
+    "fast-uri": "./node_modules/fast-uri",
+    "agents/mcp": "./node_modules/agents/dist/mcp/index.js"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "UPLINK_DEFAULT_TTL_SECONDS": "3600",
+    "UPLINK_MAX_JSON_BYTES": "1048576"
+  },
+  "secrets": {
+    "required": ["UPLINK_API_KEY", "UPLINK_SIGNING_SECRET"]
+  },
+  "r2_buckets": [
+    {
+      "binding": "UPLINK_BUCKET",
+      "bucket_name": "uplink-files"
+    }
+  ]
+}

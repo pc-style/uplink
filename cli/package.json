@@ -1,0 +1,19 @@
+{
+  "name": "uplink-cli",
+  "version": "0.1.0",
+  "description": "CLI for up!link - Cloudflare R2 file upload service",
+  "type": "module",
+  "bin": {
+    "uplink": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun run build:exe",
+    "build:exe": "bun build src/index.ts --outfile uplink.bundle.mjs --target bun && (echo '#!/usr/bin/env bun'; cat uplink.bundle.mjs) > uplink && chmod +x uplink && rm uplink.bundle.mjs",
+    "typecheck": "bun --bun tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/bun": "^1.3.8"
+  }
+}
