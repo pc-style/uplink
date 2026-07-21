@@ -76,13 +76,48 @@ bun run check
 
 ## Agent skill
 
-Install the up!link upload skill through [skills.sh](https://skills.sh/) so compatible coding agents can upload files, return signed links, and sync private asset directories:
+Install the up!link upload skill through [skills.sh](https://skills.sh/) so compatible coding agents can upload files and return signed links through the REST API:
 
 ```sh
-bunx skills add pc-style/uplink --skill uploading-with-uplink
+bunx skills add pc-style/uplink
 ```
 
-Add `--global` to make it available outside the current project. The skill expects either a configured `uplink` CLI or `UPLINK_BASE_URL` and `UPLINK_API_KEY` in the agent's environment; it does not contain credentials.
+Add `--global` to make it available outside the current project. The skill uses only `curl` and expects `UPLINK_BASE_URL` and `UPLINK_API_KEY` in the agent's environment; it does not install the CLI or contain credentials.
+
+## CLI
+
+Install the `uplink` CLI globally for your user with the interactive installer:
+
+```sh
+curl -fsSL https://install.pcstyle.dev/uplink.sh | bash
+```
+
+The installer downloads the public repository, builds the CLI with Bun, and places `uplink` in `$BUN_INSTALL/bin` (normally `~/.bun/bin`). It uses [Gum](https://github.com/charmbracelet/gum) for the prompt and progress UI when Gum is available, with a plain terminal fallback. Bun, curl, and tar are required.
+
+For a non-interactive install or a custom destination:
+
+```sh
+curl -fsSL https://install.pcstyle.dev/uplink.sh | bash -s -- --yes
+curl -fsSL https://install.pcstyle.dev/uplink.sh | bash -s -- --install-dir ~/.local/bin
+```
+
+Configure the installed CLI against your deployment:
+
+```sh
+uplink auth set --server https://uplink.<your-subdomain>.workers.dev --key <api-key>
+uplink auth show
+uplink upload ./artifact.zip --permanent
+```
+
+To build and install manually instead, clone the repository and copy the generated executable into a directory on `PATH`:
+
+```sh
+git clone https://github.com/pc-style/uplink.git
+cd uplink/cli
+bun install
+bun run build
+install -m 0755 uplink ~/.bun/bin/uplink
+```
 
 ## REST API
 
