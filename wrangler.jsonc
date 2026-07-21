@@ -1,7 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "uplink",
-  "account_id": "aa42f3106c86a8ecf22ce639f61343c7",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-06",
   "compatibility_flags": ["nodejs_compat"],
