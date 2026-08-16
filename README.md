@@ -1,6 +1,28 @@
 # up!link
 
-`up!link` is a minimalist MCP-native upload service for agents. It runs on Cloudflare Workers, stores files privately in R2, and returns Worker-signed download URLs through REST and MCP tools.
+Agents and remote development environments often need to move an artifact without committing it to a repository or making an object-storage bucket public. `up!link` is a small, self-hosted Cloudflare Worker that accepts authenticated uploads, stores them in a private R2 bucket, and returns signed download links. It exposes REST and MCP interfaces and includes a Bun-based CLI.
+
+## Status
+
+**Early-stage / experimental.** The package and CLI report version `0.1.0`. The repository has tests and type checks, but no published releases or CI workflow. There is no verified public up!link Worker or hosted demo; deploy your own instance and evaluate it with non-sensitive data before relying on it. Interfaces and storage behavior may change without a migration path.
+
+## Demo / smoke test
+
+After deploying, the unauthenticated root endpoint provides a minimal readiness response:
+
+```sh
+curl https://uplink.<your-subdomain>.workers.dev/
+```
+
+It returns JSON describing the service and its endpoints. Upload and file-information routes require the deployment's API key. The included agent skill is discoverable with `bunx --bun skills add pc-style/uplink --list`, but it is not a hosted upload service.
+
+## Install
+
+Choose one of these paths:
+
+- **Service:** follow [Self-hosting](#self-hosting) to deploy the Worker and R2 bucket to your Cloudflare account.
+- **Agent skill:** run `bunx skills add pc-style/uplink` for a compatible coding agent.
+- **CLI:** inspect [`install.sh`](install.sh), then run `curl -fsSL https://install.pcstyle.dev/uplink.sh | bash`; or build it from the cloned source as described under [CLI](#cli).
 
 ## Features
 
@@ -8,6 +30,16 @@
 - One shared API key for REST and MCP access.
 - Worker-owned signed download URLs, temporary or permanent.
 - Uploads through raw HTTP bodies, multipart forms, JSON `{ filename, encoding, content }`, temporary signed PUT URLs, remote URL ingestion, and MCP tool calls.
+
+## Trust and privacy
+
+- The operator controls the Cloudflare account and R2 bucket. Uploaded file bodies are stored in that bucket; filenames, timestamps, content types, and supplied metadata are stored with objects. URL ingestion also records the source host.
+- API routes use one shared bearer API key. Anyone with that key can upload, inspect object metadata, and create links. The CLI stores the server and API key as JSON at `~/.config/uplink/config.json`; protect that file and prefer environment variables on shared systems.
+- Signed upload and download URLs are bearer credentials. Anyone who receives one can use it until it expires. A “permanent” link has no expiry; rotating `UPLINK_SIGNING_SECRET` invalidates existing signed links.
+- The default Wrangler configuration enables Cloudflare observability with full head sampling. Review Cloudflare's logging, retention, data-location, and R2 policies for your account before uploading sensitive data.
+- This repository provides no delete endpoint or automated retention policy. Bucket lifecycle rules and deletion are the operator's responsibility.
+- `ingest-url` makes an outbound request from the Worker to a caller-supplied HTTP(S) URL. Only give the API key to callers you trust with that capability.
+- The installer downloads the current `main` branch and builds it locally; it is not pinned to a release or commit. Review the script/source or install from a pinned checkout when reproducibility matters.
 
 ## Self-hosting
 
@@ -207,3 +239,11 @@ bun run typecheck
 bun test
 bun run check
 ```
+
+## Provenance
+
+The canonical source is [github.com/pc-style/uplink](https://github.com/pc-style/uplink). The public installer endpoint currently serves this repository's [`install.sh`](install.sh), which downloads and builds `pc-style/uplink` from GitHub. No release binaries are published; the checked-in `cli/uplink` executable is generated JavaScript and can be rebuilt with `bun run --cwd cli build`.
+
+## License
+
+No license is granted for this repository. See [LICENSE](LICENSE). Public source availability does not by itself grant permission to use, copy, modify, or distribute the code.

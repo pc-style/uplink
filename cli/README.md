@@ -264,4 +264,4 @@ bun run cli/src/index.ts --help
 
 ## License
 
-MIT
+No license is granted for this repository. See the root [LICENSE](../LICENSE) file.
