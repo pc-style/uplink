@@ -16,6 +16,19 @@ curl https://uplink.<your-subdomain>.workers.dev/
 
 It returns JSON describing the service and its endpoints. Upload and file-information routes require the deployment's API key. The included agent skill is discoverable with `bunx --bun skills add pc-style/uplink --list`, but it is not a hosted upload service.
 
+## Quickstart
+
+If someone has already deployed an up!link Worker and handed you a key shaped `uplink_<host>_<secret>`, setup is two commands — the key embeds the server address, so no URL configuration is needed:
+
+```sh
+bunx skills add pc-style/uplink
+export UPLINK_API_KEY=uplink_<host>_<secret>
+```
+
+Your agent can now upload files and mint links. The CLI works off the same single variable, or persist it with `uplink auth set --key <api-key>`.
+
+Operators generate these keys during [Self-hosting](#self-hosting) with `bun run make-key <deployment-url>`. Legacy keys without the `uplink_` prefix still work; clients then also need `UPLINK_BASE_URL` (skill) or `UPLINK_SERVER` (CLI).
+
 ## Install
 
 Choose one of these paths:
@@ -58,17 +71,7 @@ The default configuration deploys a Worker named `uplink` with an R2 bucket name
 bunx wrangler r2 bucket create uplink-files
 ```
 
-Generate two independent secrets. Keep `UPLINK_API_KEY`; clients need it to authenticate. `UPLINK_SIGNING_SECRET` is only used by the Worker to sign upload and download URLs.
-
-```sh
-openssl rand -hex 32
-bunx wrangler secret put UPLINK_API_KEY
-
-openssl rand -hex 32
-bunx wrangler secret put UPLINK_SIGNING_SECRET
-```
-
-Paste the corresponding generated value when each command prompts for it. Generate the binding types, run the checks, and deploy:
+Generate the binding types, run the checks, and deploy:
 
 ```sh
 bunx wrangler types
@@ -77,7 +80,21 @@ bun test
 bun run deploy
 ```
 
-Wrangler prints the deployment URL, normally `https://uplink.<your-subdomain>.workers.dev`. Confirm it is online, then use the API key from above for REST or MCP requests:
+Wrangler prints the deployment URL, normally `https://uplink.<your-subdomain>.workers.dev`. Generate the API key from that URL — the key embeds the host so clients need nothing else — and set it as the Worker's `UPLINK_API_KEY` secret, pasting the printed key when prompted:
+
+```sh
+bun run make-key https://uplink.<your-subdomain>.workers.dev
+bunx wrangler secret put UPLINK_API_KEY
+```
+
+Generate a second, independent secret for `UPLINK_SIGNING_SECRET`; it is only used by the Worker to sign upload and download URLs:
+
+```sh
+openssl rand -hex 32
+bunx wrangler secret put UPLINK_SIGNING_SECRET
+```
+
+Confirm the deployment is online, then hand out the `uplink_...` key for REST or MCP requests:
 
 ```sh
 curl https://uplink.<your-subdomain>.workers.dev/

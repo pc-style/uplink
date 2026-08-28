@@ -122,4 +122,4 @@ fi
 
 info "Installed up!link CLI to $INSTALL_DIR/uplink"
 "$INSTALL_DIR/uplink" --version
-printf '\nNext: uplink auth set --server https://<worker>.workers.dev --key <api-key>\n'
+printf '\nNext: uplink auth set --key <api-key>   (add --server <url> for keys without the uplink_ prefix)\n'

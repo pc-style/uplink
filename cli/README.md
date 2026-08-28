@@ -32,11 +32,13 @@ ln -s $(pwd)/cli/uplink /usr/local/bin/uplink
 
 ### Configure Authentication
 
-First, set your up!link server URL and API key:
+First, set your API key. Keys shaped `uplink_<host>_<secret>` embed the server address, so the key alone is enough:
 
 ```bash
-uplink auth set --server https://your-uplink-server.com --key YOUR_API_KEY
+uplink auth set --key YOUR_API_KEY
 ```
+
+For legacy keys without the `uplink_` prefix, pass the server explicitly with `--server https://your-uplink-server.com`. The `UPLINK_API_KEY` and `UPLINK_SERVER` environment variables override the saved config.
 
 View your current configuration:
 

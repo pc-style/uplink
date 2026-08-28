@@ -27,6 +27,12 @@ ln -s $(pwd)/cli/uplink /usr/local/bin/uplink
 ### Configure
 
 ```bash
+uplink auth set --key YOUR_API_KEY
+```
+
+Keys shaped `uplink_<host>_<secret>` embed the server address. For legacy keys, add `--server https://your-server.com`:
+
+```bash
 uplink auth set --server https://your-server.com --key YOUR_API_KEY
 ```
 

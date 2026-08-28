@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "wrangler deploy --dry-run",
+    "make-key": "bun scripts/make-key.ts",
     "types": "wrangler types"
   },
   "devDependencies": {
