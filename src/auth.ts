@@ -1,4 +1,4 @@
-import { safeEqualString } from "./crypto";
+import { verifyApiKey } from "./apikeys";
 
 export function getPresentedApiKey(request: Request): string | null {
   const auth = request.headers.get("authorization");
@@ -9,7 +9,5 @@ export function getPresentedApiKey(request: Request): string | null {
 }
 
 export async function isAuthorized(request: Request, env: Env): Promise<boolean> {
-  const presented = getPresentedApiKey(request);
-  if (!presented || !env.UPLINK_API_KEY) return false;
-  return safeEqualString(presented, env.UPLINK_API_KEY);
+  return (await verifyApiKey(env, getPresentedApiKey(request), new URL(request.url).host)) !== null;
 }

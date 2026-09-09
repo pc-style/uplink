@@ -15,6 +15,18 @@ export async function safeEqualString(left: string, right: string): Promise<bool
   return diff === 0;
 }
 
+export async function hmacSha256Hex(secret: string, payload: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, textEncoder.encode(payload)));
+  return [...signature].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export async function hmacSha256Base64Url(secret: string, payload: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",

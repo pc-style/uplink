@@ -27,7 +27,7 @@ export UPLINK_API_KEY=uplink_<host>_<secret>
 
 Your agent can now upload files and mint links. The CLI works off the same single variable, or persist it with `uplink auth set --key <api-key>`.
 
-Operators generate these keys during [Self-hosting](#self-hosting) with `bun run make-key <deployment-url>`. Legacy keys without the `uplink_` prefix still work; clients then also need `UPLINK_BASE_URL` (skill) or `UPLINK_SERVER` (CLI).
+Operators generate these keys during [Self-hosting](#self-hosting) with `bun run make-key <deployment-url>` (the static key) or `bun run new-key <deployment-url> [label]` (extra signed keys, no redeploy). Legacy keys without the `uplink_` prefix still work; clients then also need `UPLINK_BASE_URL` (skill) or `UPLINK_SERVER` (CLI).
 
 ## Install
 
@@ -40,14 +40,15 @@ Choose one of these paths:
 ## Features
 
 - Private R2 storage through the `UPLINK_BUCKET` binding.
-- One shared API key for REST and MCP access.
+- One static API key plus any number of signed, named keys minted offline with `bun run new-key`; MCP additionally supports OAuth 2.1 with a built-in authorization server.
 - Worker-owned signed download URLs, temporary or permanent.
 - Uploads through raw HTTP bodies, multipart forms, JSON `{ filename, encoding, content }`, temporary signed PUT URLs, remote URL ingestion, and MCP tool calls.
 
 ## Trust and privacy
 
 - The operator controls the Cloudflare account and R2 bucket. Uploaded file bodies are stored in that bucket; filenames, timestamps, content types, and supplied metadata are stored with objects. URL ingestion also records the source host.
-- API routes use one shared bearer API key. Anyone with that key can upload, inspect object metadata, and create links. The CLI stores the server and API key as JSON at `~/.config/uplink/config.json`; protect that file and prefer environment variables on shared systems.
+- API routes use bearer API keys: the static `UPLINK_API_KEY` and any signed keys minted with `bun run new-key`. Every key has full access; anyone with one can upload, inspect object metadata, and create links. Signed keys cannot be revoked individually, only all at once by rotating `UPLINK_SIGNING_SECRET`. The CLI stores the server and API key as JSON at `~/.config/uplink/config.json`; protect that file and prefer environment variables on shared systems.
+- MCP OAuth tokens are stateless and signed with `UPLINK_SIGNING_SECRET`. Anyone who can approve the consent page (which asks for the API key) can mint them, and they cannot be revoked individually; rotate `UPLINK_SIGNING_SECRET` to invalidate all of them.
 - Signed upload and download URLs are bearer credentials. Anyone who receives one can use it until it expires. A “permanent” link has no expiry; rotating `UPLINK_SIGNING_SECRET` invalidates existing signed links.
 - The default Wrangler configuration enables Cloudflare observability with full head sampling. Review Cloudflare's logging, retention, data-location, and R2 policies for your account before uploading sensitive data.
 - This repository provides no delete endpoint or automated retention policy. Bucket lifecycle rules and deletion are the operator's responsibility.
@@ -71,6 +72,12 @@ The default configuration deploys a Worker named `uplink` with an R2 bucket name
 bunx wrangler r2 bucket create uplink-files
 ```
 
+The MCP OAuth flow needs a KV namespace to enforce single-use authorization codes. Create it and paste the printed `id` into `kv_namespaces[0].id` in `wrangler.jsonc`:
+
+```sh
+bunx wrangler kv namespace create uplink-oauth-codes
+```
+
 Generate the binding types, run the checks, and deploy:
 
 ```sh
@@ -87,12 +94,22 @@ bun run make-key https://uplink.<your-subdomain>.workers.dev
 bunx wrangler secret put UPLINK_API_KEY
 ```
 
-Generate a second, independent secret for `UPLINK_SIGNING_SECRET`; it is only used by the Worker to sign upload and download URLs:
+Generate a second, independent secret for `UPLINK_SIGNING_SECRET`; the Worker uses it to sign upload/download URLs, MCP OAuth tokens, and additional API keys:
 
 ```sh
 openssl rand -hex 32
 bunx wrangler secret put UPLINK_SIGNING_SECRET
 ```
+
+### More keys without redeploying
+
+`make-key` produces the one static key stored in the `UPLINK_API_KEY` secret. To hand out extra, named keys (one per agent, per teammate, per CI job) without touching Worker secrets, mint signed keys with the deployment's signing secret available locally (`UPLINK_SIGNING_SECRET` in the environment, `.env`, or `.dev.vars`):
+
+```sh
+bun run new-key https://uplink.<your-subdomain>.workers.dev ci-bot
+```
+
+The key looks like `uplink_<host>_ci-bot.<nonce>.<hmac>` and works immediately for REST, MCP, and the OAuth consent page. All signed keys share one revocation switch: rotating `UPLINK_SIGNING_SECRET` invalidates every one of them (plus all signed URLs and OAuth tokens). The static key is unaffected by rotation.
 
 Confirm the deployment is online, then hand out the `uplink_...` key for REST or MCP requests:
 
@@ -238,7 +255,7 @@ The remote MCP endpoint is:
 https://uplink.example.workers.dev/mcp
 ```
 
-MCP requests require the same bearer token or `x-api-key` header. Tools:
+It speaks MCP 2026-07-28 (with fallback for 2025-era clients) and accepts either the API key (`Authorization: Bearer` or `x-api-key`) or an OAuth 2.1 access token. There is no identity provider and no user accounts: the Worker is its own authorization server, and "logging in" on the consent page means pasting an API key. OAuth here is only the standard handshake that lets clients which cannot set headers (Claude, Cursor, VS Code, MCP Inspector) connect with just the URL; the trust model is unchanged. Details in [docs/mcp.md](./docs/mcp.md). Tools:
 
 - `upload_file`
 - `upload_text`
@@ -247,7 +264,7 @@ MCP requests require the same bearer token or `x-api-key` header. Tools:
 - `create_download_url`
 - `get_file_info`
 
-For clients that need a local proxy, use `mcp-remote` and configure headers according to that client/proxy’s supported environment variables or command-line options.
+Clients that can neither do OAuth nor set headers can still use a local proxy such as `mcp-remote` to forward the API key.
 
 ## Verification
 
