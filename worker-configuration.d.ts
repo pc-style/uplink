@@ -11,6 +11,7 @@ declare namespace Cloudflare {
 		UPLINK_MAX_JSON_BYTES: "1048576";
 		UPLINK_API_KEY: string;
 		UPLINK_SIGNING_SECRET: string;
+		UPLINK_OAUTH_CODES: KVNamespace;
 	}
 }
 interface Env extends Cloudflare.Env {}

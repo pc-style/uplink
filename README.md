@@ -72,6 +72,12 @@ The default configuration deploys a Worker named `uplink` with an R2 bucket name
 bunx wrangler r2 bucket create uplink-files
 ```
 
+The MCP OAuth flow needs a KV namespace to enforce single-use authorization codes. Create it and paste the printed `id` into `kv_namespaces[0].id` in `wrangler.jsonc`:
+
+```sh
+bunx wrangler kv namespace create uplink-oauth-codes
+```
+
 Generate the binding types, run the checks, and deploy:
 
 ```sh

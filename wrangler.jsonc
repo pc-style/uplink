@@ -20,5 +20,12 @@
       "binding": "UPLINK_BUCKET",
       "bucket_name": "uplink-files"
     }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "UPLINK_OAUTH_CODES",
+      // Replace with the id `wrangler kv namespace create uplink-oauth-codes` prints. See README Self-hosting.
+      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+    }
   ]
 }

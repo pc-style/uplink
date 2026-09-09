@@ -7,7 +7,9 @@
 // - RFC 9207 `iss` on the authorization response
 // - Client ID Metadata Documents (preferred) and stateless Dynamic Client Registration (deprecated fallback)
 //
-// Everything is stateless: codes, tokens, and DCR client IDs are HMAC-signed with UPLINK_SIGNING_SECRET.
+// Codes, tokens, and DCR client IDs are HMAC-signed with UPLINK_SIGNING_SECRET, so the server keeps no
+// per-token state beyond one exception: authorization codes are single-use, tracked in the
+// UPLINK_OAUTH_CODES KV namespace (see codeAlreadyUsed below). Everything else stays stateless.
 // "Logging in" means proving you hold the deployment's API key. Rotating the signing secret revokes everything.
 import {
   type AuthInfo,
@@ -458,6 +460,21 @@ async function handleAuthorize(request: Request, env: Env): Promise<Response> {
 
 // --- token endpoint ---------------------------------------------------------
 
+// Marks an authorization code as used, in the UPLINK_OAUTH_CODES KV namespace, once every other check
+// (signature, expiry, client, redirect, resource, PKCE) has already passed. Returns true if the code was
+// already used (the caller should reject the request as a replay), false the first time it's called for
+// a given code. This is the one piece of the OAuth flow that isn't fully stateless: without it, a valid
+// code plus its PKCE verifier could be replayed for the code's whole 5-minute TTL (see docs/mcp.md). KV
+// writes aren't atomic, so two genuinely concurrent requests for the same code have a narrow race window;
+// that's still a large improvement over the unbounded replay window it replaces.
+async function codeAlreadyUsed(env: Env, code: string, exp: number): Promise<boolean> {
+  const key = `code-used:${bytesToBase64Url(await sha256Bytes(code))}`;
+  if ((await env.UPLINK_OAUTH_CODES.get(key)) !== null) return true;
+  const ttlSeconds = Math.max(60, exp - nowSeconds());
+  await env.UPLINK_OAUTH_CODES.put(key, "1", { expirationTtl: ttlSeconds });
+  return false;
+}
+
 async function handleToken(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return oauthErrorResponse(405, "invalid_request", "Use POST.", { allow: "POST, OPTIONS" });
   const contentType = request.headers.get("content-type") ?? "";
@@ -493,6 +510,9 @@ async function handleToken(request: Request, env: Env): Promise<Response> {
     if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return oauthErrorResponse(400, "invalid_grant", "code_verifier is required.");
     const challenge = bytesToBase64Url(await sha256Bytes(verifier));
     if (!(await safeEqualString(challenge, payload.cc))) return oauthErrorResponse(400, "invalid_grant", "PKCE verification failed.");
+    if (await codeAlreadyUsed(env, code, payload.exp)) {
+      return oauthErrorResponse(400, "invalid_grant", "Authorization code has already been used.");
+    }
     return issueTokens(env, { clientId, audience: payload.aud, scope: payload.scope });
   }
 

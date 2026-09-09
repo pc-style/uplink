@@ -307,6 +307,43 @@ describe("OAuth authorization code flow", () => {
     expect(((await response.json()) as { error: string }).error).toBe("invalid_grant");
   });
 
+  it("rejects replaying an already-exchanged authorization code, even with the correct verifier", async () => {
+    const env = testEnv();
+    const provider = new TestProvider("http://localhost:3333/callback");
+    await auth(provider, { serverUrl: MCP_URL, fetchFn: workerFetch(env) });
+    const redirect = await approveConsent(env, provider.redirectedTo as URL, env.UPLINK_API_KEY);
+    const code = new URL(redirect.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    const tokenRequestBody = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      code_verifier: provider.codeVerifier(),
+      client_id: provider.clientInformation()?.client_id ?? "",
+      redirect_uri: provider.redirectUrl,
+      resource: MCP_URL,
+    }).toString();
+
+    const first = await fetchWorker(
+      new Request(`${ORIGIN}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: tokenRequestBody,
+      }),
+      env,
+    );
+    expect(first.status).toBe(200);
+
+    const replay = await fetchWorker(
+      new Request(`${ORIGIN}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: tokenRequestBody,
+      }),
+      env,
+    );
+    expect(replay.status).toBe(400);
+    expect(((await replay.json()) as { error: string }).error).toBe("invalid_grant");
+  });
+
   it("rejects access tokens issued for another resource (RFC 8707 audience binding)", async () => {
     const env = testEnv();
     const foreign = await signPayload(env, {
