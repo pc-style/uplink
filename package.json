@@ -11,6 +11,7 @@
     "test": "vitest run",
     "check": "wrangler deploy --dry-run",
     "make-key": "bun scripts/make-key.ts",
+    "new-key": "bun scripts/new-key.ts",
     "types": "wrangler types"
   },
   "devDependencies": {
