@@ -36,6 +36,7 @@ const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const DCR_CLIENT_PREFIX = "uplink-dcr.";
 const CIMD_FETCH_TIMEOUT_MS = 5000;
+const CIMD_MAX_BODY_BYTES = 16 * 1024;
 
 type CodePayload = { t: "code"; cid: string; ru: string; cc: string; aud: string; scope: string; exp: number };
 type AccessPayload = { t: "access"; cid: string; aud: string; scope: string; exp: number; jti: string };
@@ -209,6 +210,36 @@ function isAllowedRedirectUri(value: string): boolean {
   return /^[a-z][a-z0-9+.-]*:$/i.test(url.protocol) && url.protocol.includes(".");
 }
 
+// Reads a response body up to maxBytes, returning null (instead of buffering further) if it's exceeded.
+async function readBodyWithLimit(body: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<string | null> {
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) return null;
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder().decode(concatBytes(chunks, total));
+}
+
+function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
 async function resolveClient(env: Env, clientId: string): Promise<ResolvedClient | null> {
   if (clientId.startsWith(DCR_CLIENT_PREFIX)) {
     const payload = await verifyPayload(env, clientId.slice(DCR_CLIENT_PREFIX.length));
@@ -242,7 +273,11 @@ async function resolveClient(env: Env, clientId: string): Promise<ResolvedClient
       redirect: "error",
     });
     if (!response.ok) return null;
-    document = await response.json();
+    const declaredLength = response.headers.get("content-length");
+    if (declaredLength !== null && Number(declaredLength) > CIMD_MAX_BODY_BYTES) return null;
+    const text = await readBodyWithLimit(response.body, CIMD_MAX_BODY_BYTES);
+    if (text === null) return null;
+    document = JSON.parse(text);
   } catch {
     return null;
   }
@@ -253,7 +288,7 @@ async function resolveClient(env: Env, clientId: string): Promise<ResolvedClient
   return {
     clientId,
     redirectUris,
-    name: typeof record.client_name === "string" ? record.client_name : undefined,
+    name: typeof record.client_name === "string" ? record.client_name.slice(0, 120) : undefined,
   };
 }
 
