@@ -4,12 +4,6 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-05-06",
   "compatibility_flags": ["nodejs_compat"],
-  "alias": {
-    "fast-deep-equal": "./node_modules/fast-deep-equal",
-    "json-schema-traverse": "./node_modules/json-schema-traverse",
-    "fast-uri": "./node_modules/fast-uri",
-    "agents/mcp": "./node_modules/agents/dist/mcp/index.js"
-  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
