@@ -93,7 +93,7 @@ function metadataOptions(request: Request) {
  * issued for this resource, otherwise the 401/403 challenge Response to return.
  */
 export async function authenticateMcpRequest(request: Request, env: Env): Promise<AuthInfo | Response> {
-  const apiKey = await verifyApiKey(env, getPresentedApiKey(request));
+  const apiKey = await verifyApiKey(env, getPresentedApiKey(request), new URL(request.url).host);
   if (apiKey) {
     return {
       token: getPresentedApiKey(request) ?? "",
@@ -435,7 +435,7 @@ async function handleAuthorize(request: Request, env: Env): Promise<Response> {
   }
 
   const presentedKey = form.get("api_key")?.trim() ?? "";
-  if (!(await verifyApiKey(env, presentedKey))) {
+  if (!(await verifyApiKey(env, presentedKey, new URL(request.url).host))) {
     return htmlResponse(401, renderConsentPage(validation.params, validation.client, "That API key is not valid for this deployment."));
   }
 

@@ -15,8 +15,8 @@ describe("signed API keys", () => {
   it("accepts a signed key and reports its label; the static key is 'default'", async () => {
     const env = testEnv();
     const key = await mintSignedApiKey(env.UPLINK_SIGNING_SECRET, "uplink.test", "ci-bot");
-    expect(await verifyApiKey(env, key)).toEqual({ label: "ci-bot" });
-    expect(await verifyApiKey(env, env.UPLINK_API_KEY)).toEqual({ label: "default" });
+    expect(await verifyApiKey(env, key, "uplink.test")).toEqual({ label: "ci-bot" });
+    expect(await verifyApiKey(env, env.UPLINK_API_KEY, "uplink.test")).toEqual({ label: "default" });
     expect(await isAuthorized(new Request("https://uplink.test/api/files/x", { headers: { "x-api-key": key } }), env)).toBe(
       true,
     );
@@ -25,13 +25,23 @@ describe("signed API keys", () => {
   it("rejects keys signed with another secret, tampered labels, and junk", async () => {
     const env = testEnv();
     const foreign = await mintSignedApiKey("other-secret", "uplink.test", "ci-bot");
-    expect(await verifyApiKey(env, foreign)).toBeNull();
+    expect(await verifyApiKey(env, foreign, "uplink.test")).toBeNull();
 
     const key = await mintSignedApiKey(env.UPLINK_SIGNING_SECRET, "uplink.test", "ci-bot");
-    expect(await verifyApiKey(env, key.replace("_ci-bot.", "_admin."))).toBeNull();
-    expect(await verifyApiKey(env, "uplink_uplink.test_nope")).toBeNull();
-    expect(await verifyApiKey(env, "")).toBeNull();
-    expect(await verifyApiKey(env, null)).toBeNull();
+    expect(await verifyApiKey(env, key.replace("_ci-bot.", "_admin."), "uplink.test")).toBeNull();
+    expect(await verifyApiKey(env, "uplink_uplink.test_nope", "uplink.test")).toBeNull();
+    expect(await verifyApiKey(env, "", "uplink.test")).toBeNull();
+    expect(await verifyApiKey(env, null, "uplink.test")).toBeNull();
+  });
+
+  it("rejects a validly signed key presented to a different host, even under the same secret", async () => {
+    const env = testEnv();
+    const key = await mintSignedApiKey(env.UPLINK_SIGNING_SECRET, "uplink.test", "ci-bot");
+    expect(await verifyApiKey(env, key, "uplink.test")).toEqual({ label: "ci-bot" });
+    expect(await verifyApiKey(env, key, "other-deployment.test")).toBeNull();
+    expect(
+      await isAuthorized(new Request("https://other-deployment.test/api/files/x", { headers: { "x-api-key": key } }), env),
+    ).toBe(false);
   });
 
   it("uses distinct nonces so two keys with the same label differ", async () => {

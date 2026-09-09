@@ -9,5 +9,5 @@ export function getPresentedApiKey(request: Request): string | null {
 }
 
 export async function isAuthorized(request: Request, env: Env): Promise<boolean> {
-  return (await verifyApiKey(env, getPresentedApiKey(request))) !== null;
+  return (await verifyApiKey(env, getPresentedApiKey(request), new URL(request.url).host)) !== null;
 }
