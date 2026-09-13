@@ -36,3 +36,6 @@ dumbass
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# local notes
+TODO.md

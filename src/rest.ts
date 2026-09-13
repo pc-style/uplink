@@ -17,6 +17,12 @@ export async function handleRest(request: Request, env: Env): Promise<Response> 
         name: "up!link",
         status: "ok",
         endpoints: ["/api/upload", "/api/upload-url", "/api/ingest-url", "/api/sign", "/api/files/:key", "/mcp"],
+        mcp: {
+          endpoint: "/mcp",
+          protocolVersions: ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"],
+          auth: ["api-key", "oauth"],
+          resourceMetadata: "/.well-known/oauth-protected-resource/mcp",
+        },
       });
     }
 

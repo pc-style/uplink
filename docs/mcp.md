@@ -14,14 +14,42 @@ Example:
 https://uplink.example.workers.dev/mcp
 ```
 
+## Protocol version
+
+The server speaks MCP **2026-07-28** (stateless: no `initialize`, per-request `_meta` envelope, `server/discover`). Clients that still send the 2025 handshake are served through the built-in legacy fallback, so older clients keep working.
+
 ## Authentication
 
-MCP requests use the same API key as the REST API:
+Every `/mcp` request must carry one of:
 
-- `Authorization: Bearer <UPLINK_API_KEY>`
-- or `x-api-key: <UPLINK_API_KEY>`
+- **API key** — `Authorization: Bearer <UPLINK_API_KEY>` or `x-api-key: <UPLINK_API_KEY>`. Same key as REST.
+- **OAuth 2.1 access token** — `Authorization: Bearer <access_token>` issued by the Worker's built-in authorization server (below).
 
-If the key is missing or invalid, the endpoint returns `401`.
+Requests without valid credentials get `401` with a `WWW-Authenticate: Bearer resource_metadata="…"` challenge, so MCP clients discover the OAuth flow automatically.
+
+### OAuth
+
+The Worker is both the MCP resource server and its own authorization server. There is no external identity provider and there are no user accounts: the consent page authenticates you with an API key, and the resulting access token is just a short-lived, audience-bound stand-in for that key. Use OAuth when the client cannot send headers; otherwise the API key alone is equivalent.
+
+Discovery:
+
+- `GET /.well-known/oauth-protected-resource/mcp` — protected resource metadata (RFC 9728)
+- `GET /.well-known/oauth-authorization-server` — authorization server metadata (RFC 8414)
+
+Endpoints:
+
+- `GET /oauth/authorize` — consent page. "Logging in" means pasting the deployment's `UPLINK_API_KEY`; approving redirects back with `code`, `state`, and `iss`.
+- `POST /oauth/token` — `authorization_code` (PKCE S256 required) and `refresh_token` grants. Form-encoded, public clients only.
+- `POST /oauth/register` — dynamic client registration. Deprecated in the spec but kept for clients that still need it.
+
+Rules:
+
+- Scope is `uplink` (full access, same as the API key).
+- The `resource` parameter (RFC 8707) must be `https://<host>/mcp`. Tokens are bound to that audience; a token minted for one deployment is rejected by another.
+- Client IDs may be **Client ID Metadata Documents**: an `https://` URL with a path whose JSON echoes `client_id` and contains a `redirect_uris` array. This is the preferred way to identify a client. DCR client IDs are also accepted.
+- Redirect URIs must be `https://`, `http://localhost`/`127.0.0.1`/`[::1]`, or a private dotted scheme (`com.example.app:/callback`).
+- Access tokens live 1 hour, refresh tokens 30 days. Refresh tokens rotate on use.
+- Codes and tokens are signed with `UPLINK_SIGNING_SECRET`; the Worker keeps no per-token state beyond one exception: authorization codes are single-use, tracked in the `UPLINK_OAUTH_CODES` KV namespace (a used code's hash is stored until its own 5-minute expiry). Everything else stays stateless: there is no per-token revocation, and a rotated-out refresh token stays valid until its own expiry. Rotating `UPLINK_SIGNING_SECRET` invalidates every code and token at once (and every signed download/upload URL). Deployments that need true refresh-token rotation (invalidating the predecessor on use) can extend the same KV namespace or add a Durable Object; that is intentionally not part of the default.
 
 ## What the MCP server does
 
@@ -158,6 +186,12 @@ Returns the same object metadata as `GET /api/files/:key`.
 
 ## Client setup
 
-If your MCP client supports custom headers, send the same API key used by REST.
+Clients that support remote OAuth only need the URL:
 
-If the client cannot attach headers directly, use a local MCP proxy such as `mcp-remote` and configure that proxy to forward the API key.
+```text
+https://uplink.example.workers.dev/mcp
+```
+
+The client will hit the `401` challenge, discover the authorization server, open the consent page, and you paste the deployment's API key once. No proxy is needed.
+
+If your client supports custom headers but not OAuth, send the same API key used by REST as `Authorization: Bearer` or `x-api-key`.

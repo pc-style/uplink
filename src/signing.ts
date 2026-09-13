@@ -19,6 +19,26 @@ export type SignOptions = {
   contentType?: string;
 };
 
+/** Sign any JSON payload as `base64url(json).base64url(hmac)` with the Worker signing secret. */
+export async function signPayload(env: Env, payload: unknown): Promise<string> {
+  const payloadPart = textToBase64Url(JSON.stringify(payload));
+  const signaturePart = await hmacSha256Base64Url(env.UPLINK_SIGNING_SECRET, payloadPart);
+  return `${payloadPart}.${signaturePart}`;
+}
+
+/** Verify a `signPayload` token and return its decoded payload, or null when malformed or tampered. */
+export async function verifyPayload(env: Env, token: string): Promise<unknown | null> {
+  const [payloadPart, signaturePart, extra] = token.split(".");
+  if (!payloadPart || !signaturePart || extra !== undefined) return null;
+  const expectedSignature = await hmacSha256Base64Url(env.UPLINK_SIGNING_SECRET, payloadPart);
+  if (!(await safeEqualString(signaturePart, expectedSignature))) return null;
+  try {
+    return JSON.parse(base64UrlToText(payloadPart)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 export async function signToken(env: Env, options: SignOptions): Promise<string> {
   const payload: SignedPayload = {
     purpose: options.purpose,
@@ -27,9 +47,7 @@ export async function signToken(env: Env, options: SignOptions): Promise<string>
     filename: options.filename,
     contentType: options.contentType,
   };
-  const payloadPart = textToBase64Url(JSON.stringify(payload));
-  const signaturePart = await hmacSha256Base64Url(env.UPLINK_SIGNING_SECRET, payloadPart);
-  return `${payloadPart}.${signaturePart}`;
+  return signPayload(env, payload);
 }
 
 export async function verifyToken(
@@ -38,17 +56,9 @@ export async function verifyToken(
   purpose: SignedPurpose,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<SignedPayload | null> {
-  const [payloadPart, signaturePart, extra] = token.split(".");
-  if (!payloadPart || !signaturePart || extra !== undefined) return null;
-  const expectedSignature = await hmacSha256Base64Url(env.UPLINK_SIGNING_SECRET, payloadPart);
-  if (!(await safeEqualString(signaturePart, expectedSignature))) return null;
-
-  let payload: SignedPayload;
-  try {
-    payload = JSON.parse(base64UrlToText(payloadPart)) as SignedPayload;
-  } catch {
-    return null;
-  }
+  const decoded = await verifyPayload(env, token);
+  if (!decoded || typeof decoded !== "object") return null;
+  const payload = decoded as SignedPayload;
 
   if (payload.purpose !== purpose || typeof payload.key !== "string" || payload.key.length === 0) {
     return null;

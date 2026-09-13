@@ -4,12 +4,6 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-05-06",
   "compatibility_flags": ["nodejs_compat"],
-  "alias": {
-    "fast-deep-equal": "./node_modules/fast-deep-equal",
-    "json-schema-traverse": "./node_modules/json-schema-traverse",
-    "fast-uri": "./node_modules/fast-uri",
-    "agents/mcp": "./node_modules/agents/dist/mcp/index.js"
-  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
@@ -25,6 +19,13 @@
     {
       "binding": "UPLINK_BUCKET",
       "bucket_name": "uplink-files"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "UPLINK_OAUTH_CODES",
+      // Replace with the id `wrangler kv namespace create uplink-oauth-codes` prints. See README Self-hosting.
+      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
     }
   ]
 }
